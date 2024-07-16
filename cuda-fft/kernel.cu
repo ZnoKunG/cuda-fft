@@ -11,6 +11,11 @@
 #include <iostream>
 #include <complex>
 #include <cuComplex.h>
+#include <map>
+#include <vector>
+#include <fstream>
+
+typedef std::map<uint32_t, std::vector<double>> ComputeTimeList;
 
 # define M_PI 3.14159265358979323846  /* pi */
 
@@ -71,26 +76,11 @@ __global__ void dft_kernel(cuFloatComplex* a, cuFloatComplex* A, uint32_t N)
 
 void computeDft_CPU(std::complex<float>* a, std::complex<float>* A, uint32_t N)
 {
-	std::cout << "CPU computing DFT ..." << std::endl;
-	clock_t start, end;
-	double time_used;
-
-	start = clock();
-
 	dft(a, A, N);
-
-	end = clock();
-	time_used = ((double)(end - start) * 1000) / CLOCKS_PER_SEC;
-	std::cout << "Time used (ms): " << time_used << std::endl;
 }
 
 void computeDft_GPU(cuComplex* a, cuComplex* A, uint32_t N)
 {
-	clock_t start, end;
-	double time_used;
-
-	start = clock();
-
 	// GPU DFT Execution
 	// -----------------
 	cuComplex* cuda_a;
@@ -109,12 +99,6 @@ void computeDft_GPU(cuComplex* a, cuComplex* A, uint32_t N)
 
 	cudaMemcpy(A, cuda_A, sizeof(A) * N, cudaMemcpyDeviceToHost);
 	// -----------------
-
-	end = clock();
-	time_used = ((double)(end - start) * 1000) / CLOCKS_PER_SEC;
-
-	std::cout << "GPU computing DFT ..." << std::endl;
-	std::cout << "Time used (ms): " << time_used << std::endl;
 }
 
 void fft(std::complex<float>* a, std::complex<float>* A, uint32_t N)
@@ -210,40 +194,22 @@ __global__ void fft_kernel(cuComplex* a, cuComplex* A, uint32_t N, int logN)
 
 void computeFFT_CPU(std::complex<float>* a, std::complex<float>* A, uint32_t N)
 {
-	clock_t start, end;
-	double time_used;
-
-	std::cout << "Computing FFT on CPU ..." << std::endl;
-
 	if (N & (N - 1))
 	{
 		std::cout << "N must be a power of 2" << std::endl;
 		return;
 	}
 
-	start = clock();
-
 	fft(a, A, N);
-
-	end = clock();
-	time_used = ((double)(end - start) * 1000) / CLOCKS_PER_SEC;
-	std::cout << "Time used (ms): " << time_used << std::endl;
 }
 
 void computeFFT_GPU(cuComplex* a, cuComplex* A, uint32_t N)
 {
-	clock_t start, end;
-	double time_used;
-
-	std::cout << "Computing FFT on GPU ..." << std::endl;
-
 	if (N & (N - 1))
 	{
 		std::cout << "N must be a power of 2" << std::endl;
 		return;
 	}
-
-	start = clock();
 
 	// GPU FFT Execution
 	// -----------------
@@ -264,16 +230,17 @@ void computeFFT_GPU(cuComplex* a, cuComplex* A, uint32_t N)
 
 	cudaMemcpy(A, cuda_A, sizeof(A) * N, cudaMemcpyDeviceToHost);
 	// --------------
-
-	end = clock();
-	time_used = ((double)(end - start) * 1000) / CLOCKS_PER_SEC;
-	std::cout << "Time used (ms): " << time_used << std::endl;
 }
 
 uint32_t ToPower2_N(uint32_t N)
 {
-	int exponent = (int)round(log2(N)) + 1;
+	// if N is power of 2
+	if (!(N & (N - 1)))
+	{
+		return N;
+	}
 
+	int exponent = (int)(log2(N)) + 1;
 	return 1 << exponent;
 }
 
@@ -309,9 +276,52 @@ cuComplex* ToPower2_Matrix_GPU(cuComplex* in, uint32_t N, int fill_with)
 	return out;
 }
 
-int main()
+std::vector<double> compute_dft(uint32_t N)
 {
-	uint32_t nSample = 5000;
+	std::cout << "Computing DFT N = " << N << std::endl;
+
+	std::vector<double> timeUseList;
+
+	std::complex<float>* a_cpu = new std::complex<float>[N];
+	cuComplex* a_gpu = new cuComplex[N];
+
+	for (uint32_t i = 0; i < N; i++)
+	{
+		a_cpu[i] = std::complex<float>((float)(i + 1), 0);
+		a_gpu[i] = make_cuFloatComplex((float)(i + 1), 0);
+	}
+
+	std::complex<float>* A_cpu = new std::complex<float>[N];
+	cuComplex* A_gpu = new cuComplex[N];
+
+	clock_t start, end;
+	double time_used;
+
+	start = clock();
+	computeDft_CPU(a_cpu, A_cpu, N);
+	end = clock();
+	time_used = ((double)(end - start) * 1000) / CLOCKS_PER_SEC;
+
+	timeUseList.push_back(time_used);
+
+	start = clock();
+	computeDft_GPU(a_gpu, A_gpu, N);
+	end = clock();
+	time_used = ((double)(end - start) * 1000) / CLOCKS_PER_SEC;
+
+	timeUseList.push_back(time_used);
+
+	return timeUseList;
+}
+
+std::vector<double> compute_fft(uint32_t nSample)
+{
+	uint32_t N = ToPower2_N(nSample);
+
+	std::cout << "Computing FFT N = " << N << std::endl;
+
+	std::vector<double> timeUseList;
+
 	std::complex<float>* a_cpu = new std::complex<float>[nSample];
 	cuComplex* a_gpu = new cuComplex[nSample];
 
@@ -325,19 +335,92 @@ int main()
 	cuComplex* a_gpu_2;
 	a_cpu_2 = ToPower2_Matrix_CPU(a_cpu, nSample, 0);
 	a_gpu_2 = ToPower2_Matrix_GPU(a_gpu, nSample, 0);
-	uint32_t N = ToPower2_N(nSample);
 
-	std::cout << "From N: " << nSample << " to " << N << std::endl;
+	std::complex<float>* A_cpu = new std::complex<float>[N];
+	cuComplex* A_gpu = new cuComplex[N];
 
-	std::complex<float>* A_cpu_dft = new std::complex<float>[N];
-	cuComplex* A_gpu_dft = new cuComplex[N];
-	std::complex<float>* A_cpu_fft = new std::complex<float>[N];
-	cuComplex* A_gpu_fft = new cuComplex[N];
+	clock_t start, end;
+	double time_used;
 
-	computeDft_CPU(a_cpu_2, A_cpu_dft, N);
-	computeDft_GPU(a_gpu_2, A_gpu_dft, N);
-	computeFFT_CPU(a_cpu_2, A_cpu_fft, N);
-	computeFFT_GPU(a_gpu_2, A_gpu_fft, N);
+	start = clock();
+	computeFFT_CPU(a_cpu_2, A_cpu, N);
+	end = clock();
+	time_used = ((double)(end - start) * 1000) / CLOCKS_PER_SEC;
+
+	timeUseList.push_back(time_used);
+
+	start = clock();
+	computeFFT_GPU(a_gpu_2, A_gpu, N);
+	end = clock();
+	time_used = ((double)(end - start) * 1000) / CLOCKS_PER_SEC;
+
+	timeUseList.push_back(time_used);
+
+	return timeUseList;
+}
+
+void write_csv_dft(std::string file_name, ComputeTimeList list)
+{
+	std::ofstream result(file_name);
+
+	result << "N,dft_cpu,dft_gpu\n";
+
+	for (const auto& pair : list)
+	{
+		result << pair.first << "," << pair.second[0] << "," << pair.second[1] << "\n";
+	}
+
+	result.close();
+}
+
+void write_csv_fft(std::string file_name, ComputeTimeList list)
+{
+	std::ofstream result(file_name);
+
+	result << "N,fft_cpu,fft_gpu\n";
+
+	for (const auto& pair : list)
+	{
+		result << pair.first << "," << pair.second[0] << "," << pair.second[1] << "\n";
+	}
+
+	result.close();
+}
+
+int main()
+{
+	ComputeTimeList timeComputeDFT;
+	ComputeTimeList timeComputeFFT;
+	
+	for (uint32_t i = 20; i <= 5000; i += 20)
+	{
+		std::vector<double> timeList = compute_dft(i);
+		timeComputeDFT.insert(std::make_pair(i, timeList));
+	}
+
+	write_csv_dft("result_dft.csv", timeComputeDFT);
+
+	for (uint32_t i = 20; i <= 50000; i += 20)
+	{
+		std::vector<double> timeList = compute_fft(i);
+		timeComputeFFT.insert(std::make_pair(i, timeList));
+	}
+
+	write_csv_fft("result_fft.csv", timeComputeFFT);
+
+	for (const auto& pair : timeComputeDFT)
+	{
+		std::cout << "Time use to compute for N = " << pair.first << std::endl;
+		std::cout << "DFT CPU (ms): " << pair.second[0];
+		std::cout << ", DFT GPU (ms): " << pair.second[1] << std::endl;
+	}
+
+	for (const auto& pair : timeComputeFFT)
+	{
+		std::cout << "Time use to compute for N = " << pair.first << std::endl;
+		std::cout << ", FFT CPU (ms): " << pair.second[0];
+		std::cout << ", FFT GPU (ms): " << pair.second[1] << std::endl;
+	}
 
 	int i;
 	std::cin >> i;
