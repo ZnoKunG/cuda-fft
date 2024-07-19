@@ -457,7 +457,7 @@ int main()
 	write_csv("result_fft_cpu.csv", timeComputeFFT_cpu);
 	write_csv("result_fft_gpu.csv", timeComputeFFT_gpu);
 
-	std::cout << "\rComputatiton success!" << std::endl;
+	std::cout << "Computation success!" << std::endl;
 
 	int i;
 	std::cin >> i;
